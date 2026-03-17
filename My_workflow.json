@@ -1,0 +1,50 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "supplier-ingest",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "e6eba2cc-e31a-410d-92f8-77f86f978bb5",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        620,
+        240
+      ],
+      "webhookId": "955fabef-d04b-4184-b869-83eb7d30ab45"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "name": "First item",
+          "code": 1
+        }
+      },
+      {
+        "json": {
+          "name": "Second item",
+          "code": 2
+        }
+      }
+    ]
+  },
+  "connections": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ebde554b-6a32-4256-92dc-1c82ef5fd5ed",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5b74e729f0940617dfa910fd7865f73c67c16dbb2ae2b3ae6a9c8099e94f71f9"
+  },
+  "id": "D4wVQkmuKXN6qRX0",
+  "tags": []
+}
