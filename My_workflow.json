@@ -17,6 +17,45 @@
         240
       ],
       "webhookId": "955fabef-d04b-4184-b869-83eb7d30ab45"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst fileData = item.fileData;\nconst source_hash = item.source_hash;\nconst source_file_name = item.source_file_name;\n\n// Decode base64 CSV\nconst csvText = Buffer.from(fileData, 'base64').toString('utf-8');\n\n// Parse CSV lines (ignore comments and empty lines)\nconst lines = csvText.split('\\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));\nconst headers = lines[0].split(',').map(h => h.trim());\nconst rows = [];\n\nfor (let i = 1; i < lines.length; i++) {\n  const values = lines[i].split(',').map(v => v.trim());\n  if (values.length < 2) continue;\n\n  const row = {};\n  headers.forEach((h, idx) => { row[h] = values[idx] || ''; });\n\n  // Map to unified schema\n  const amount_excl = parseFloat(row['amount_excl']) || null;\n  const vat_rate = parseFloat(row['vat_rate']) || null;\n  const vat_given = row['vat'] !== undefined && row['vat'] !== '' ? parseFloat(row['vat']) : null;\n  const amount_incl_given = row['amount_incl'] !== undefined && row['amount_incl'] !== '' ? parseFloat(row['amount_incl']) : null;\n\n  // Calculate VAT\n  let vat = vat_given;\n  if (vat === null && vat_rate !== null && amount_excl !== null) {\n    vat = Math.round(amount_excl * vat_rate / 100 * 100) / 100;\n  } else if (vat === null && amount_excl !== null) {\n    vat = Math.round(amount_excl * 0.15 * 100) / 100;\n  }\n\n  // Calculate amount_incl_vat\n  let amount_incl_vat = amount_incl_given;\n  if (amount_incl_vat === null && amount_excl !== null && vat !== null) {\n    amount_incl_vat = Math.round((amount_excl + vat) * 100) / 100;\n  }\n\n  rows.push({\n    json: {\n      invoice_number: row['invoice_number'] || '',\n      supplier_number: row['supplier_number'] || '',\n      supplier_name: row['supplier_name'] || '',\n      department: row['department'] || '',\n      invoice_date: row['invoice_date'] || '',\n      amount_excl_vat: amount_excl,\n      vat: vat,\n      amount_incl_vat: amount_incl_vat,\n      vat_rate_used: vat_rate || 15,\n      source_hash,\n      source_file_name\n    }\n  });\n}\n\nreturn rows;"
+      },
+      "id": "201b0d33-d46b-4b18-a35a-9f190ea71166",
+      "name": "Code1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.first();\nconst binaryKey = Object.keys(item.binary || {})[0];\n\nif (!binaryKey) {\n  throw new Error('No file received in webhook');\n}\n\nconst binaryData = item.binary[binaryKey];\nconst buffer = Buffer.from(binaryData.data, 'base64');\nconst hash = crypto.createHash('sha256').update(buffer).digest('hex');\nconst fileName = binaryData.fileName || 'unknown.csv';\n\nreturn [{\n  json: {\n    source_hash: hash,\n    source_file_name: fileName,\n    fileData: binaryData.data\n  }\n}];"
+      },
+      "id": "87d2453c-c6e7-418d-8e0d-261b947627b3",
+      "name": "Hash file",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\n// Get today's date in Africa/Johannesburg timezone\nconst nowJHB = new Date(new Date().toLocaleString('en-US', { timeZone: 'Africa/Johannesburg' }));\nnowJHB.setHours(0, 0, 0, 0);\n\nfor (const item of items) {\n  const r = item.json;\n  const notes = [];\n\n  // 1. Required fields check\n  if (!r.invoice_number) notes.push('Missing invoice_number');\n  if (!r.supplier_number) notes.push('Missing supplier_number');\n  if (!r.supplier_name) notes.push('Missing supplier_name');\n  if (!r.department) notes.push('Missing department');\n  if (r.amount_excl_vat === null) notes.push('Missing amount_excl_vat');\n  if (r.vat === null) notes.push('Missing vat');\n  if (r.amount_incl_vat === null) notes.push('Missing amount_incl_vat');\n  if (!r.invoice_date) notes.push('Missing invoice_date');\n\n  // 2. Date not in the future\n  if (r.invoice_date) {\n    const invoiceDate = new Date(r.invoice_date);\n    if (invoiceDate > nowJHB) {\n      notes.push('invoice_date is in the future');\n    }\n  }\n\n  // 3. Math check: amount_incl_vat = amount_excl_vat + vat (±0.01 tolerance)\n  if (r.amount_excl_vat !== null && r.vat !== null && r.amount_incl_vat !== null) {\n    const expected = Math.round((r.amount_excl_vat + r.vat) * 100) / 100;\n    if (Math.abs(expected - r.amount_incl_vat) > 0.01) {\n      notes.push(`Math error: ${r.amount_excl_vat} + ${r.vat} should equal ${expected}, got ${r.amount_incl_vat}`);\n    }\n  }\n\n  // 4. VAT rate check (default 15%)\n  if (r.amount_excl_vat !== null && r.vat !== null) {\n    const expectedVat = Math.round(r.amount_excl_vat * 0.15 * 100) / 100;\n    if (r.vat_rate_used !== 15 && Math.abs(expectedVat - r.vat) > 0.01) {\n      notes.push(`VAT mismatch: expected ${expectedVat} at 15%, got ${r.vat}`);\n    }\n  }\n\n  const valid = notes.length === 0;\n\n  results.push({\n    json: {\n      ...r,\n      valid,\n      validation_notes: valid ? null : notes.join('; ')\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "169b6383-24ae-40b0-aeca-2ded0e8c9148",
+      "name": "Parse CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        260
+      ]
     }
   ],
   "pinData": {
@@ -35,12 +74,46 @@
       }
     ]
   },
-  "connections": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Hash file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash file": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "ebde554b-6a32-4256-92dc-1c82ef5fd5ed",
+  "versionId": "cfd755f8-dbee-4701-9b04-d134517063c2",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "5b74e729f0940617dfa910fd7865f73c67c16dbb2ae2b3ae6a9c8099e94f71f9"
